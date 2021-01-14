@@ -1,4 +1,4 @@
-FROM metabrainz/python:3.7-20190302 as listenbrainz-base
+FROM metabrainz/python:newconsul as listenbrainz-base
 
 ARG deploy_env
 
@@ -67,25 +67,63 @@ RUN useradd --create-home --shell /bin/bash --uid 900 --gid 900 lbdumps
 RUN groupadd --gid 901 listenbrainz_stats_cron
 RUN useradd --create-home --shell /bin/bash --uid 901 --gid 901 listenbrainz_stats_cron
 
+# runit service files
+# All services are created with a `down` file, preventing them from starting
+# rc.local removes the down file for the specific service we want to run in a container
+# http://smarden.org/runit/runsv.8.html
 
-# Add cron jobs
+# cron jobs
+# TODO: Cron jobs require template file config.sh to be present
+#   Do we override cron `run` file with template render that then executes cron??
 ADD docker/stats-crontab /etc/cron.d/stats-crontab
 RUN chmod 0644 /etc/cron.d/stats-crontab && crontab -u listenbrainz_stats_cron /etc/cron.d/stats-crontab
 ADD docker/dump-crontab /etc/cron.d/dump-crontab
 RUN chmod 0644 /etc/cron.d/dump-crontab && crontab -u lbdumps /etc/cron.d/dump-crontab
-
-# Make sure the cron service doesn't start automagically
-# http://smarden.org/runit/runsv.8.html
 RUN touch /etc/service/cron/down
 
-# Consul Template service is already set up with the base image.
-# Just need to copy the configuration.
-COPY ./docker/consul-template.conf /etc/consul-template.conf
+# API Compat (last.fm) server
+COPY ./docker/$deploy_env/api_compat/uwsgi-api-compat.ini /etc/uwsgi/uwsgi-api-compat.ini
+COPY ./docker/$deploy_env/api_compat/consul-template-api-compat.conf /etc/consul-template-api-compat.conf
+COPY ./docker/$deploy_env/api_compat/api_compat.service /etc/service/api_compat/run
+RUN chmod +x /etc/service/api_compat/run
+RUN touch /etc/service/api_compat/down
+
+# Follow dispatcher
+COPY ./docker/$deploy_env/follow_dispatcher/consul-template-follow-dispatcher.conf /etc/consul-template-follow-dispatcher.conf
+COPY ./docker/$deploy_env/follow_dispatcher/follow_dispatcher.service /etc/service/follow_dispatcher/run
+RUN chmod +x /etc/service/follow_dispatcher/run
+RUN touch /etc/service/follow_dispatcher/down
+
+# Labs API
+COPY ./docker/$deploy_env/labs_api/uwsgi-labs-api.ini /etc/uwsgi/uwsgi-labs-api.ini
+COPY ./docker/$deploy_env/labs_api/consul-template-labs-api.conf /etc/consul-template-labs-api.conf
+COPY ./docker/$deploy_env/labs_api/labs_api.service /etc/service/labs_api/run
+RUN chmod +x /etc/service/labs_api/run
+RUN touch /etc/service/labs_api/down
+
+# Spark reader
+COPY ./docker/$deploy_env/spark_reader/consul-template-spark-reader.conf /etc/consul-template-spark-reader.conf
+COPY ./docker/$deploy_env/spark_reader/spark_reader.service /etc/service/spark_reader/run
+RUN chmod +x /etc/service/spark_reader/run
+RUN touch /etc/service/spark_reader/down
+
+# Spotify reader
+COPY ./docker/$deploy_env/spotify_reader/consul-template-spotify-reader.conf /etc/consul-template-spotify-reader.conf
+COPY ./docker/$deploy_env/spotify_reader/spotify_reader.service /etc/service/spotify_reader/run
+RUN chmod +x /etc/service/spotify_reader/run
+RUN touch /etc/service/spotify_reader/down
+
+# Timescale writer
+COPY ./docker/$deploy_env/timescale_writer/consul-template-timescale-writer.conf /etc/consul-template-timescale-writer.conf
+COPY ./docker/$deploy_env/timescale_writer/timescale_writer.service /etc/service/timescale_writer/run
+RUN chmod +x /etc/service/timescale_writer/run
+RUN touch /etc/service/timescale_writer/down
+
+# uwsgi (website)
+COPY ./docker/$deploy_env/uwsgi/uwsgi.ini /etc/uwsgi/uwsgi.ini
+COPY ./docker/$deploy_env/uwsgi/consul-template-uwsgi.conf /etc/consul-template-uwsgi.conf
 COPY ./docker/$deploy_env/uwsgi/uwsgi.service /etc/service/uwsgi/run
 RUN chmod 755 /etc/service/uwsgi/run
-COPY ./docker/$deploy_env/uwsgi/uwsgi.ini /etc/uwsgi/uwsgi.ini
-COPY ./docker/$deploy_env/uwsgi/uwsgi-labs-api.ini /etc/uwsgi/uwsgi-labs-api.ini
-COPY ./docker/prod/uwsgi/uwsgi-api-compat.ini /etc/uwsgi/uwsgi-api-compat.ini
 RUN touch /etc/service/uwsgi/down
 
 COPY ./docker/rc.local /etc/rc.local
